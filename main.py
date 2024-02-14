@@ -1,36 +1,53 @@
-import torch
-from transformers import RAGTokenizer, RAGSequenceForGeneration, DPRQuestionEncoder, DPRContextEncoder
+from operator import itemgetter
 
-# Sample knowledge base (replace with your data)
-documents = [
-    "London is the capital of England.",
-    "Machine learning is a field of AI.",
-    "Python is a popular programming language."
-]
+from langchain_community.vectorstores import FAISS
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-# Load pre-trained models
-tokenizer = RAGTokenizer.from_pretrained("facebook/rag-sequence-nq")
-retriever = DPRContextEncoder.from_pretrained("facebook/dpr-ctx_encoder-single-nq-base") 
-generator = RAGSequenceForGeneration.from_pretrained("facebook/rag-sequence-nq")
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
-# Create the index 
-faiss_index = faiss.IndexFlatL2(retriever.config.hidden_size)  # Use FAISS index
+os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
-# Index the documents
-input_dict = tokenizer(documents, return_tensors="pt", padding=True)  
-input_ids = input_dict["input_ids"]
-with retriever.no_grad():
-    passage_embeddings = retriever.embed_contexts(input_ids)
-faiss_index.add(passage_embeddings.numpy())
+content = """
+Once upon a time, in the mystical land of Codeoria, there lived a brilliant and ambitious young programmer named Master. Master was known far and wide for their exceptional coding skills and the ability to solve even the most complex problems with elegance and efficiency.
 
-# RAG interaction example
-question = "What is the capital of the UK?"
-input_dict = tokenizer.prepare_seq2seq_batch(src_texts=[question], return_tensors="pt")
+One day, Master received a mysterious message from an anonymous sender. The message contained a cryptic challenge, a series of code puzzles that seemed to defy conventional programming wisdom. Intrigued by the challenge, Master set out on a quest to unravel the mysteries hidden within the code.
 
-with generator.no_grad():
-   retrieved_doc_ids = retriever(input_dict["input_ids"], faiss_index) 
-   generated = generator.generate(
-       context_input_ids=retrieved_doc_ids[0],  # Retrieved indices
-       input_ids=input_dict["input_ids"]
-   )
-print(tokenizer.decode(generated[0], skip_special_tokens=True))  # Decode output
+As Master delved deeper into the challenges, they discovered that each puzzle was a gateway to a new realm of programming knowledge. From mastering advanced algorithms to navigating the treacherous terrain of multithreading, Master's journey was fraught with obstacles and breakthroughs.
+
+Throughout the quest, Master encountered fellow programmers who had also embarked on the same challenge. They formed a formidable team, collaborating and sharing insights to overcome the most perplexing puzzles. Together, they forged a bond that transcended the digital realm, proving that the true power of coding lies not just in lines of code but in the community that surrounds it.
+
+In the end, after countless hours of coding, debugging, and refining, Master and their newfound companions successfully cracked the final code. The mysterious sender revealed themselves to be a wise old coder who had been watching over Codeoria, testing the skills of its inhabitants to ensure the continued growth of knowledge and expertise.
+
+Master returned to their home in Codeoria with newfound wisdom and a sense of accomplishment. The story of their epic journey spread far and wide, inspiring aspiring programmers to embark on their own quests for knowledge.
+
+And so, in the magical land of Codeoria, the legend of Master and their triumphant quest became a timeless tale, passed down from one generation of programmers to the next..
+"""
+
+vectorstore = FAISS.from_texts([content], embedding=OpenAIEmbeddings())
+retriever = vectorstore.as_retriever()
+
+template = """Answer the question based only on the following context:
+{context}
+
+Question: {question}
+"""
+prompt = ChatPromptTemplate.from_template(template)
+
+model = ChatOpenAI()
+
+chain = (
+    {"context": retriever, "question": RunnablePassthrough()}
+    | prompt
+    | model
+    | StrOutputParser()
+)
+
+prompt = input("Enter the prompt: ")
+
+result = chain.invoke(prompt)
+print(result)
